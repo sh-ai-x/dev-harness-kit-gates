@@ -29,7 +29,7 @@ MAINTENANCE_FILE = WORKFLOWS_DIR / "maintenance.yml"
 # Inputs every Phase-4 judge workflow MUST declare.
 SHARED_INPUTS = {
     "gates_json_b64":        {"type": "string", "required": True},
-    "provider":              {"type": "choice", "required": True},
+    "provider":              {"type": "string", "required": True},
     "model":                 {"type": "string", "required": False},
     "plugin_repo":           {"type": "string", "required": False},
     "plugin_skill_path":     {"type": "string", "required": False},
@@ -175,16 +175,19 @@ def test_maintenance_extra_inputs():
     inputs = _load_judge(MAINTENANCE_FILE)["inputs"]
     for name in ("bump_pr_skip_pattern", "docs_check_cmd", "format_audit_cmd", "pr_title"):
         assert name in inputs, f"maintenance.yml: missing extra input {name}"
-    # Provider enum includes deepseek only on maintenance.
-    opts = inputs["provider"]["options"]
-    assert "deepseek" in opts, "maintenance.yml: provider must include deepseek"
+    # Provider values are documented in the description (workflow_call
+    # inputs don't support enum/choice constraints -- that's
+    # workflow_dispatch-only). Deepseek is a maintenance-only provider.
+    assert "deepseek" in inputs["provider"]["description"], (
+        "maintenance.yml: provider description must mention deepseek"
+    )
 
 
 def test_review_security_no_deepseek():
     for wf_path in (REVIEW_FILE, SECURITY_FILE):
-        opts = _load_judge(wf_path)["inputs"]["provider"]["options"]
-        assert "deepseek" not in opts, (
-            f"{wf_path.name}: provider must NOT include deepseek (review/security don't have it)"
+        desc = _load_judge(wf_path)["inputs"]["provider"]["description"]
+        assert "deepseek" not in desc, (
+            f"{wf_path.name}: provider description must NOT mention deepseek (review/security don't have it)"
         )
 
 

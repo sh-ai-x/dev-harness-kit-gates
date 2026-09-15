@@ -17,9 +17,8 @@ on:
         required: true
       provider:
         description: LLM provider for the judge (minimax | claude | codex)
-        type: choice
+        type: string
         required: true
-        options: [minimax, claude, codex]
         default: minimax
       model:
         description: provider model override; empty = provider default
