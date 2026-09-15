@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   pytest:
-    name: pytest (resolver + workflow_call pin + wrapper budget)
+    name: pytest (resolver + workflow_call pin + wrapper budget + universal helpers + judge shape)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -79,7 +79,7 @@ jobs:
           python3 - <<'PY'
           import sys, pathlib, yaml
           ok = True
-          for p in pathlib.Path(".github/workflows").glob("*.yml"):
+          for p in pathlib.Path(".github/workflows").glob("**/*.yml"):
               try:
                   yaml.safe_load(p.read_text())
                   print(f"OK: {p}")
@@ -87,4 +87,42 @@ jobs:
                   print(f"FAIL: {p}: {e}", file=sys.stderr)
                   ok = False
           sys.exit(0 if ok else 1)
+          PY
+
+  judge-workflow-call-shape:
+    name: judge workflow_call shape (Phase 4 pin)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pin inputs/outputs/secrets on each Phase 4 judge workflow
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import yaml, pathlib
+
+          # Each Phase 4 judge workflow MUST declare workflow_call,
+          # the shared 12-input contract, the 3-output contract, and
+          # secrets.install_token. Maintenance drops pr_updated_at
+          # (no PR-comments retry loop) and adds bump_pr_skip_pattern,
+          # docs_check_cmd, format_audit_cmd, pr_title.
+          SHARED = [
+              "gates_json_b64", "provider", "model", "plugin_repo",
+              "plugin_skill_path", "install_token_secret", "audit_marker",
+              "pr_number", "pr_head_sha", "pr_is_from_fork", "pr_updated_at",
+              "run_id",
+          ]
+          OUTPUTS = ["verdict", "agent_ran", "verdict_source"]
+
+          for name, drop in [("review.yml", set()), ("security.yml", set()), ("maintenance.yml", {"pr_updated_at"})]:
+              wf = yaml.safe_load(pathlib.Path(f".github/workflows/{name}").read_text())[True]
+              assert "workflow_call" in wf, f"{name}: missing workflow_call trigger"
+              inputs = wf["workflow_call"]["inputs"]
+              for inp in SHARED:
+                  if inp in drop:
+                      continue
+                  assert inp in inputs, f"{name}: missing shared input {inp}"
+              for out in OUTPUTS:
+                  assert out in wf["workflow_call"]["outputs"], f"{name}: missing output {out}"
+              assert "install_token" in wf["workflow_call"].get("secrets", {}), f"{name}: missing secrets.install_token"
+          print("OK: judge workflow_call shape pinned")
           PY

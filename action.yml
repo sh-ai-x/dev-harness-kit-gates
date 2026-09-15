@@ -1,5 +1,5 @@
 name: 'dev-harness-kit/gates'
-description: 'Composite action that resolves which dev-harness-kit gates run for a PR, then calls each judge.'
+description: 'Composite action that resolves which dev-harness-kit gates run for a PR, then calls each judge. Phase 4 — adds conditional invocation of review.yml / security.yml / maintenance.yml when the resolver enables them.'
 author: 'sh-ai-x <tkd1496@gmail.com>'
 
 inputs:
@@ -17,6 +17,45 @@ inputs:
     description: 'Name of the artifact storing the verdict comment payload'
     required: false
     default: 'gate-verdict'
+  # Phase 4 (additive): per-gate inputs forwarded to the judge
+  # workflows. Defaults target the dev-harness-kit consumer; override
+  # for non-dev-kit repos.
+  plugin_repo:
+    description: 'GitHub slug of the plugin source (default: dev-harness-kit)'
+    required: false
+    default: 'sh-ai-x/dev-harness-kit'
+  pr_number:
+    description: 'PR number the judges should review'
+    required: false
+    default: ''
+  pr_head_sha:
+    description: 'PR head commit SHA (closes the agent→checkout TOCTOU)'
+    required: false
+    default: ''
+  pr_title:
+    description: 'PR title (used for bump-PR skip in maintenance)'
+    required: false
+    default: ''
+  pr_is_from_fork:
+    description: 'true when the PR head repo differs from the upstream repo (skip the agent runs)'
+    required: false
+    default: 'false'
+  pr_updated_at:
+    description: 'PR updated_at ISO timestamp (used as fallback cutoff for the PR-comments retry loop)'
+    required: false
+    default: ''
+  run_id:
+    description: 'GitHub Actions run id (used for the audit comment)'
+    required: false
+    default: '0'
+  docs_check_cmd:
+    description: 'Shell command for the docs-updated sub-gate. Empty = skip the sub-gate.'
+    required: false
+    default: ''
+  format_audit_cmd:
+    description: 'Optional shell command to format the audit comment. Empty = inline echo fallback.'
+    required: false
+    default: ''
 
 outputs:
   review:
@@ -31,6 +70,35 @@ outputs:
   rule_warnings:
     description: 'JSON-encoded list of RuleWarning objects from the resolver'
     value: ${{ steps.resolve.outputs.rule_warnings }}
+  # Phase 4 (additive): per-gate verdict / agent_ran / verdict_source
+  # outputs from each judge workflow. Empty when the gate did not run.
+  review_verdict:
+    description: 'Review judge verdict (Approve | Changes Requested | Blocked | empty)'
+    value: ${{ steps.review.outputs.verdict }}
+  review_agent_ran:
+    description: 'Whether the review judge agent actually ran'
+    value: ${{ steps.review.outputs.agent_ran }}
+  review_verdict_source:
+    description: 'Review verdict classifier tag'
+    value: ${{ steps.review.outputs.verdict_source }}
+  security_verdict:
+    description: 'Security judge verdict (Approve | Changes Requested | Blocked | empty)'
+    value: ${{ steps.security.outputs.verdict }}
+  security_agent_ran:
+    description: 'Whether the security judge agent actually ran'
+    value: ${{ steps.security.outputs.agent_ran }}
+  security_verdict_source:
+    description: 'Security verdict classifier tag'
+    value: ${{ steps.security.outputs.verdict_source }}
+  maintenance_verdict:
+    description: 'Maintenance judge verdict (Approve | Changes Requested | Blocked | empty)'
+    value: ${{ steps.maintenance.outputs.verdict }}
+  maintenance_agent_ran:
+    description: 'Whether the maintenance judge agent actually ran'
+    value: ${{ steps.maintenance.outputs.agent_ran }}
+  maintenance_verdict_source:
+    description: 'Maintenance verdict classifier tag'
+    value: ${{ steps.maintenance.outputs.verdict_source }}
 
 runs:
   using: 'composite'
@@ -40,3 +108,56 @@ runs:
       uses: ./.github/workflows/resolve-paths.yml
       with:
         gates_json_b64: ${{ inputs.gates_json_b64 }}
+
+    - name: Run review gate
+      id: review
+      if: steps.resolve.outputs.review == 'true'
+      uses: ./.github/workflows/review.yml
+      with:
+        gates_json_b64: ${{ inputs.gates_json_b64 }}
+        provider: ${{ inputs.provider }}
+        model: ${{ inputs.model }}
+        plugin_repo: ${{ inputs.plugin_repo }}
+        pr_number: ${{ inputs.pr_number }}
+        pr_head_sha: ${{ inputs.pr_head_sha }}
+        pr_is_from_fork: ${{ inputs.pr_is_from_fork }}
+        pr_updated_at: ${{ inputs.pr_updated_at }}
+        run_id: ${{ inputs.run_id }}
+      secrets:
+        install_token: ${{ secrets.install_token }}
+
+    - name: Run security gate
+      id: security
+      if: steps.resolve.outputs.security == 'true'
+      uses: ./.github/workflows/security.yml
+      with:
+        gates_json_b64: ${{ inputs.gates_json_b64 }}
+        provider: ${{ inputs.provider }}
+        model: ${{ inputs.model }}
+        plugin_repo: ${{ inputs.plugin_repo }}
+        pr_number: ${{ inputs.pr_number }}
+        pr_head_sha: ${{ inputs.pr_head_sha }}
+        pr_is_from_fork: ${{ inputs.pr_is_from_fork }}
+        pr_updated_at: ${{ inputs.pr_updated_at }}
+        run_id: ${{ inputs.run_id }}
+      secrets:
+        install_token: ${{ secrets.install_token }}
+
+    - name: Run maintenance gate
+      id: maintenance
+      if: steps.resolve.outputs.maintenance == 'true'
+      uses: ./.github/workflows/maintenance.yml
+      with:
+        gates_json_b64: ${{ inputs.gates_json_b64 }}
+        provider: ${{ inputs.provider }}
+        model: ${{ inputs.model }}
+        plugin_repo: ${{ inputs.plugin_repo }}
+        docs_check_cmd: ${{ inputs.docs_check_cmd }}
+        format_audit_cmd: ${{ inputs.format_audit_cmd }}
+        pr_number: ${{ inputs.pr_number }}
+        pr_head_sha: ${{ inputs.pr_head_sha }}
+        pr_title: ${{ inputs.pr_title }}
+        pr_is_from_fork: ${{ inputs.pr_is_from_fork }}
+        run_id: ${{ inputs.run_id }}
+      secrets:
+        install_token: ${{ secrets.install_token }}

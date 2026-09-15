@@ -21,3 +21,6 @@ node_modules/
 # Local test artifacts
 *.tmp
 test-results/
+
+# dev-kit session-internal state (hand-off notes, trace journals)
+.dev-kit/
