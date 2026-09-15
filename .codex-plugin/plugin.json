@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json.schemastore.org/codex-plugin-manifest.json",
+  "name": "dev-harness-kit-gates",
+  "displayName": "Dev Harness Kit Gates",
+  "version": "0.3.350",
+  "description": "SIBLING REPO: see .claude-plugin/plugin.json for rationale.",
+  "author": { "name": "sanghee", "url": "https://github.com/sanghee" },
+  "homepage": "https://github.com/sh-ai-x/dev-harness-kit-gates",
+  "repository": "https://github.com/sh-ai-x/dev-harness-kit-gates",
+  "license": "MIT"
+}

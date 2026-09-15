@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "dev-harness-kit-gates",
+  "displayName": "Dev Harness Kit Gates",
+  "version": "0.3.350",
+  "description": "SIBLING REPO: GitHub Actions reusable workflows for dev-harness-kit gates. This manifest exists ONLY to satisfy the slot-freshness guard in dev-harness-kit's git-guard.sh hook; the gates repo is not itself a Claude plugin.",
+  "author": {
+    "name": "sanghee",
+    "url": "https://github.com/sanghee"
+  },
+  "homepage": "https://github.com/sh-ai-x/dev-harness-kit-gates",
+  "repository": "https://github.com/sh-ai-x/dev-harness-kit-gates",
+  "license": "MIT",
+  "keywords": ["github-actions", "reusable-workflows", "dev-harness-kit"]
+}
