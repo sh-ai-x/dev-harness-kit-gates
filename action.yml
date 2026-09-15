@@ -1,6 +1,6 @@
 name: 'dev-harness-kit/gates'
 description: 'Composite action that resolves which dev-harness-kit gates run for a PR, then calls each judge.'
-author: 'sanghee'
+author: 'sh-ai-x <tkd1496@gmail.com>'
 
 inputs:
   gates_json_b64:
