@@ -4,7 +4,11 @@
   "displayName": "Dev Harness Kit Gates",
   "version": "0.3.350",
   "description": "SIBLING REPO: see .claude-plugin/plugin.json for rationale.",
-  "author": { "name": "sanghee", "url": "https://github.com/sanghee" },
+  "author": {
+    "name": "sh-ai-x",
+    "email": "tkd1496@gmail.com",
+    "url": "https://github.com/sh-ai-x"
+  },
   "homepage": "https://github.com/sh-ai-x/dev-harness-kit-gates",
   "repository": "https://github.com/sh-ai-x/dev-harness-kit-gates",
   "license": "MIT"
