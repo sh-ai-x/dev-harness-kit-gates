@@ -1,0 +1,42 @@
+name: 'dev-harness-kit/gates'
+description: 'Composite action that resolves which dev-harness-kit gates run for a PR, then calls each judge.'
+author: 'sanghee'
+
+inputs:
+  gates_json_b64:
+    description: 'base64-encoded JSON of `.dev-kit/gates.json` minus secrets'
+    required: true
+  provider:
+    description: 'LLM provider name (minimax | claude | codex)'
+    required: true
+  model:
+    description: 'Model override; consumer-controlled'
+    required: false
+    default: ''
+  output_artifact:
+    description: 'Name of the artifact storing the verdict comment payload'
+    required: false
+    default: 'gate-verdict'
+
+outputs:
+  review:
+    description: 'true iff review gate should run for this PR'
+    value: ${{ steps.resolve.outputs.review }}
+  security:
+    description: 'true iff security gate should run for this PR'
+    value: ${{ steps.resolve.outputs.security }}
+  maintenance:
+    description: 'true iff maintenance gate should run for this PR'
+    value: ${{ steps.resolve.outputs.maintenance }}
+  rule_warnings:
+    description: 'JSON-encoded list of RuleWarning objects from the resolver'
+    value: ${{ steps.resolve.outputs.rule_warnings }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Resolve gate set from path_rules
+      id: resolve
+      uses: ./.github/workflows/resolve-paths.yml
+      with:
+        gates_json_b64: ${{ inputs.gates_json_b64 }}

@@ -1,0 +1,90 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    name: pytest (resolver + workflow_call pin + wrapper budget)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pytest + pyyaml
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet pytest pyyaml
+      - name: Run pytest
+        run: |
+          set -euo pipefail
+          python3 -m pytest tests/ -v
+
+  workflow-call-shape:
+    name: workflow_call input shape (yaml pin)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pin inputs declared by resolve-paths.yml
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re, pathlib
+          wf = pathlib.Path(".github/workflows/resolve-paths.yml").read_text()
+          required_keys = {"type", "required"}
+          m = re.search(r"workflow_call:\s*\n(.*?)(?=\n[a-z_]+:|\Z)", wf, re.S)
+          assert m, "no workflow_call block"
+          block = m.group(1)
+          assert "gates_json_b64" in block, "gates_json_b64 input missing"
+          for needle in ("type: string", "required: true", "description:"):
+              assert needle in block, f"missing required fragment: {needle}"
+          print("OK: workflow_call input shape pinned")
+          PY
+
+  action-shape:
+    name: action.yml shape (yaml pin)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pin action.yml metadata
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import yaml, pathlib
+          data = yaml.safe_load(pathlib.Path("action.yml").read_text())
+          assert data["name"] == "dev-harness-kit/gates", data["name"]
+          assert data["runs"]["using"] == "composite"
+          for inp in ("gates_json_b64", "provider"):
+              assert inp in data["inputs"], f"missing input: {inp}"
+              assert data["inputs"][inp]["required"] is True, inp
+          for out in ("review", "security", "maintenance", "rule_warnings"):
+              assert out in data["outputs"], f"missing output: {out}"
+          print("OK: action.yml shape pinned")
+          PY
+
+  workflow-yml-yaml-validity:
+    name: workflow YAML files parse
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse every workflow as YAML
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import sys, pathlib, yaml
+          ok = True
+          for p in pathlib.Path(".github/workflows").glob("*.yml"):
+              try:
+                  yaml.safe_load(p.read_text())
+                  print(f"OK: {p}")
+              except yaml.YAMLError as e:
+                  print(f"FAIL: {p}: {e}", file=sys.stderr)
+                  ok = False
+          sys.exit(0 if ok else 1)
+          PY

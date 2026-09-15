@@ -1,0 +1,23 @@
+# Build / cache
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.cache/
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Local env / runtime
+.env
+
+# Deps
+node_modules/
+.venv/
+
+# Local test artifacts
+*.tmp
+test-results/

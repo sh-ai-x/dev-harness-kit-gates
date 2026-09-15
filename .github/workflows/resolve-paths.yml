@@ -1,0 +1,118 @@
+name: resolve-paths
+on:
+  workflow_call:
+    inputs:
+      gates_json_b64:
+        description: 'base64-encoded JSON of `.dev-kit/gates.json` minus secrets'
+        type: string
+        required: true
+    outputs:
+      review:
+        description: 'true iff review gate should run for this PR'
+        value: ${{ jobs.resolve.outputs.review }}
+      security:
+        description: 'true iff security gate should run for this PR'
+        value: ${{ jobs.resolve.outputs.security }}
+      maintenance:
+        description: 'true iff maintenance gate should run for this PR'
+        value: ${{ jobs.resolve.outputs.maintenance }}
+      rule_warnings:
+        description: 'JSON list of RuleWarning objects from the resolver'
+        value: ${{ jobs.resolve.outputs.rule_warnings }}
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      review: ${{ steps.compute.outputs.review }}
+      security: ${{ steps.compute.outputs.security }}
+      maintenance: ${{ steps.compute.outputs.maintenance }}
+      rule_warnings: ${{ steps.compute.outputs.rule_warnings }}
+    steps:
+      - name: Decode gates.json
+        id: decode
+        env:
+          B64: ${{ inputs.gates_json_b64 }}
+        run: |
+          set -euo pipefail
+          echo "$B64" | base64 -d > gates.json
+          echo "gates.json size: $(wc -c < gates.json) bytes"
+
+      - name: List changed paths
+        id: changed
+        uses: tj-actions/changed-files@v45
+
+      - name: Compute per-gate booleans
+        id: compute
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const gates = JSON.parse(fs.readFileSync('gates.json', 'utf8'));
+            const pathRules = gates.path_rules || [];
+
+            // fnmatch-style matcher; mirrors tests/test_resolve_paths_logic.py.
+            function matchGlob(path, pattern) {
+              const regex = pattern
+                .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+                .replace(/\\*\\*/g, '::DOUBLESTAR::')
+                .replace(/\\*/g, '[^/]*')
+                .replace(/::DOUBLESTAR::/g, '.*')
+                .replace(/\\?/g, '.');
+              return new RegExp('^' + regex + '$').test(path);
+            }
+            function ruleMatches(rule, paths) {
+              const matched = paths.filter(p =>
+                rule.when.some(g => matchGlob(p, g))
+              );
+              if (rule.mode === 'any') return matched.length > 0;
+              return matched.length === paths.length && paths.length > 0;
+            }
+
+            const defaults = Object.fromEntries(
+              Object.entries(gates.gates || {}).map(([k, v]) => [k, !!v.enabled])
+            );
+
+            const changedPaths = JSON.parse(process.env.CHANGED_PATHS_JSON || '[]');
+            const warnings = [];
+
+            // Union of matching rules' gates lists. If no rule matches,
+            // return defaults (fail-closed — never silently enable a gate).
+            let anyMatch = false;
+            const matchedGates = new Set();
+            for (const rule of pathRules) {
+              if (!ruleMatches(rule, changedPaths)) continue;
+              anyMatch = true;
+              for (const g of (rule.gates || [])) {
+                if (!(g in defaults)) {
+                  warnings.push({rule: rule.name, gate: g, reason: 'unknown_gate_in_rule'});
+                  continue;
+                }
+                matchedGates.add(g);
+              }
+            }
+            const out = anyMatch
+              ? Object.fromEntries(Object.keys(defaults).map(k => [k, matchedGates.has(k)]))
+              : defaults;
+
+            core.setOutput('review',      String(!!out.review));
+            core.setOutput('security',    String(!!out.security));
+            core.setOutput('maintenance', String(!!out.maintenance));
+            core.setOutput('rule_warnings', JSON.stringify(warnings));
+        env:
+          CHANGED_PATHS_JSON: ${{ steps.changed.outputs.paths }}
+
+      - name: Emit summary
+        if: always()
+        run: |
+          {
+            echo "### dev-harness-kit/gates — resolve-paths"
+            echo
+            echo "| gate | run |"
+            echo "|---|---|"
+            echo "| review | ${{ steps.compute.outputs.review }} |"
+            echo "| security | ${{ steps.compute.outputs.security }} |"
+            echo "| maintenance | ${{ steps.compute.outputs.maintenance }} |"
+            echo
+            echo "warnings: \`${{ steps.compute.outputs.rule_warnings }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
