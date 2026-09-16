@@ -23,10 +23,31 @@ on:
         type: string
         required: true
       provider:
-        description: LLM provider for the judge (minimax | claude | codex | deepseek)
+        description: >-
+          Provider label (informational + used to pick a built-in default
+          provider_base_url when provider_base_url is empty). Recognized
+          labels with a built-in default: "minimax"
+          (https://api.minimax.io/anthropic), "deepseek"
+          (https://api.deepseek.com/anthropic). Any other value (e.g.
+          "anthropic", "openai", "custom") is untouched -- pair it with an
+          explicit provider_base_url for any Anthropic-Messages-API-
+          compatible gateway, or leave provider_base_url empty for native
+          Anthropic auth via claude-code-action's own anthropic_api_key path.
         type: string
-        required: true
+        required: false
         default: minimax
+      provider_base_url:
+        description: >-
+          Anthropic-Messages-API-compatible base URL for the selected
+          provider. Empty + a recognized `provider` label uses that
+          label's built-in default. Empty + an unrecognized label means
+          native Anthropic auth. Set this explicitly to point at ANY
+          provider not already recognized (OpenAI-compatible gateway,
+          self-hosted proxy, a new vendor, etc.) without needing a code
+          change to this workflow.
+        type: string
+        required: false
+        default: ""
       model:
         description: provider model override; empty = provider default
         type: string
@@ -114,14 +135,15 @@ on:
       install_token:
         description: token used to clone plugin_repo when the plugin source is private
         required: false
-      MINIMAX_API_KEY:
-        description: MiniMax provider API key (required when inputs.provider == 'minimax')
-        required: false
-      ANTHROPIC_API_KEY:
-        description: Anthropic provider API key (required when inputs.provider == 'anthropic' or 'codex')
-        required: false
-      DEEPSEEK_API_KEY:
-        description: DeepSeek provider API key (required when inputs.provider == 'deepseek')
+      provider_api_key:
+        description: >-
+          API key for the selected provider. The consumer supplies their
+          OWN key as a GitHub secret in their own repo and passes it here
+          -- this workflow never provides, defaults, or stores a key.
+          Used as both ANTHROPIC_API_KEY and ANTHROPIC_AUTH_TOKEN when
+          provider_base_url is set (proxied provider), or as
+          claude-code-action's anthropic_api_key input when
+          provider_base_url is empty (native Anthropic).
         required: false
 
 jobs:
@@ -144,12 +166,6 @@ jobs:
       pull-requests: write
       issues: write
       id-token: write
-    env:
-      MINIMAX_BASE_URL: https://api.minimax.io/anthropic
-      MINIMAX_DEFAULT_MODEL: 'MiniMax-M3[1m]'
-      DEEPSEEK_BASE_URL: https://api.deepseek.com/anthropic
-      DEEPSEEK_DEFAULT_PRO_MODEL: 'deepseek-v4-pro'
-      DEEPSEEK_DEFAULT_FLASH_MODEL: 'deepseek-v4-flash'
     steps:
       - name: Capture PR head SHA at run-start (TOCTOU hardening)
         id: pr_meta
@@ -202,33 +218,44 @@ jobs:
           fi
           test -f ~/.claude/plugins/marketplaces/plugin/.claude-plugin/plugin.json
 
-      - name: Resolve provider + model
+      - name: Resolve provider base URL + model
         id: provider
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           provider="${{ inputs.provider }}"
+          base_url="${{ inputs.provider_base_url }}"
           model="${{ inputs.model }}"
-          if [ -z "$model" ]; then
+          # Explicit provider_base_url always wins. Otherwise fall back
+          # to a built-in default for recognized labels; any other
+          # label (including "anthropic", "openai", "custom", or simply
+          # unset) resolves to empty -- native Anthropic auth.
+          if [ -z "$base_url" ]; then
             case "$provider" in
-              minimax) model="${MINIMAX_DEFAULT_MODEL}" ;;
-              deepseek) model="${DEEPSEEK_DEFAULT_PRO_MODEL}" ;;
-              *) model="" ;;
+              minimax)  base_url="https://api.minimax.io/anthropic" ;;
+              deepseek) base_url="https://api.deepseek.com/anthropic" ;;
+              *)        base_url="" ;;
             esac
           fi
-          if [ -z "$model" ] && [ "$provider" != "claude" ] && [ "$provider" != "codex" ]; then
-            echo "::warning::no model resolved; claude-code-action will use its default"
+          if [ -z "$model" ]; then
+            case "$provider" in
+              minimax)  model="MiniMax-M3[1m]" ;;
+              deepseek) model="deepseek-v4-pro" ;;
+              *)        model="" ;;
+            esac
+          fi
+          if [ -z "$model" ] && [ -n "$base_url" ]; then
+            echo "::warning::no model resolved for a proxied provider (base_url=$base_url); pass inputs.model explicitly"
           fi
           echo "provider=$provider" >> "$GITHUB_OUTPUT"
+          echo "base_url=$base_url" >> "$GITHUB_OUTPUT"
           echo "model=$model" >> "$GITHUB_OUTPUT"
 
-      - name: Run maintenance judge (minimax)
-        if: steps.provider.outputs.provider == 'minimax'
+      - name: Run maintenance judge (proxied provider)
+        if: steps.provider.outputs.base_url != ''
         env:
-          ANTHROPIC_BASE_URL: ${{ env.MINIMAX_BASE_URL }}
-          ANTHROPIC_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
-          ANTHROPIC_AUTH_TOKEN: ${{ secrets.MINIMAX_API_KEY }}
+          ANTHROPIC_BASE_URL: ${{ steps.provider.outputs.base_url }}
+          ANTHROPIC_API_KEY: ${{ secrets.provider_api_key }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.provider_api_key }}
           ANTHROPIC_MODEL: ${{ steps.provider.outputs.model }}
           ANTHROPIC_DEFAULT_SONNET_MODEL: ${{ steps.provider.outputs.model }}
           ANTHROPIC_DEFAULT_OPUS_MODEL: ${{ steps.provider.outputs.model }}
@@ -258,13 +285,13 @@ jobs:
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
 
-      - name: Run maintenance judge (anthropic / codex)
-        if: steps.provider.outputs.provider == 'anthropic' || steps.provider.outputs.provider == 'codex'
+      - name: Run maintenance judge (native anthropic)
+        if: steps.provider.outputs.base_url == ''
         uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1
         with:
           allowed_bots: '*'
           anthropic_oidc_audience: anthropic
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          anthropic_api_key: ${{ secrets.provider_api_key }}
           track_progress: true
           prompt: |
             Load the maintenance judge skill from $HOME/.claude/plugins/marketplaces/plugin/${{ inputs.plugin_skill_path }}
@@ -275,30 +302,6 @@ jobs:
             `Verdict: <Word>` (Approve | Changes Requested | Blocked).
 
             Do NOT include the bold-wrapped `**Verdict:**` form here.
-          claude_args: |
-            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
-
-      - name: Run maintenance judge (deepseek)
-        if: steps.provider.outputs.provider == 'deepseek'
-        env:
-          ANTHROPIC_BASE_URL: ${{ env.DEEPSEEK_BASE_URL }}
-          ANTHROPIC_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          ANTHROPIC_AUTH_TOKEN: ${{ secrets.DEEPSEEK_API_KEY }}
-          ANTHROPIC_MODEL: ${{ steps.provider.outputs.model }}
-          ANTHROPIC_DEFAULT_SONNET_MODEL: ${{ env.DEEPSEEK_DEFAULT_FLASH_MODEL }}
-          ANTHROPIC_DEFAULT_OPUS_MODEL: ${{ steps.provider.outputs.model }}
-          ANTHROPIC_DEFAULT_HAIKU_MODEL: ${{ env.DEEPSEEK_DEFAULT_FLASH_MODEL }}
-        uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1
-        with:
-          allowed_bots: '*'
-          anthropic_oidc_audience: anthropic
-          track_progress: true
-          prompt: |
-            Load the maintenance judge skill from $HOME/.claude/plugins/marketplaces/plugin/${{ inputs.plugin_skill_path }}
-            (use the Read tool). Follow its protocol against PR ${{ inputs.pr_number }}.
-
-            Apply the judge's rubric. The summary MUST begin with
-            `Verdict: <Word>`.
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
 

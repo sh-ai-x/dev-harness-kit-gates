@@ -107,17 +107,20 @@ jobs:
           import yaml, pathlib
 
           # Each Phase 4 judge workflow MUST declare workflow_call,
-          # the shared 12-input contract, the 3-output contract, and
-          # secrets.install_token. Maintenance drops pr_updated_at
-          # (no PR-comments retry loop) and adds bump_pr_skip_pattern,
-          # docs_check_cmd, format_audit_cmd, pr_title.
+          # the shared 13-input contract (generic provider mechanism --
+          # provider_base_url + a single provider_api_key secret cover
+          # any provider without a workflow code change), the 3-output
+          # contract, and the 2 shared secrets. Maintenance drops
+          # pr_updated_at (no PR-comments retry loop) and adds
+          # bump_pr_skip_pattern, docs_check_cmd, format_audit_cmd, pr_title.
           SHARED = [
-              "gates_json_b64", "provider", "model", "plugin_repo",
-              "plugin_skill_path", "install_token_secret", "audit_marker",
-              "pr_number", "pr_head_sha", "pr_is_from_fork", "pr_updated_at",
-              "run_id",
+              "gates_json_b64", "provider", "provider_base_url", "model",
+              "plugin_repo", "plugin_skill_path", "install_token_secret",
+              "audit_marker", "pr_number", "pr_head_sha", "pr_is_from_fork",
+              "pr_updated_at", "run_id",
           ]
           OUTPUTS = ["verdict", "agent_ran", "verdict_source"]
+          SECRETS = ["install_token", "provider_api_key"]
 
           for name, drop in [("review.yml", set()), ("security.yml", set()), ("maintenance.yml", {"pr_updated_at"})]:
               wf = yaml.safe_load(pathlib.Path(f".github/workflows/{name}").read_text())[True]
@@ -129,6 +132,8 @@ jobs:
                   assert inp in inputs, f"{name}: missing shared input {inp}"
               for out in OUTPUTS:
                   assert out in wf["workflow_call"]["outputs"], f"{name}: missing output {out}"
-              assert "install_token" in wf["workflow_call"].get("secrets", {}), f"{name}: missing secrets.install_token"
+              declared_secrets = wf["workflow_call"].get("secrets", {})
+              for sec in SECRETS:
+                  assert sec in declared_secrets, f"{name}: missing secrets.{sec}"
           print("OK: judge workflow_call shape pinned")
           PY

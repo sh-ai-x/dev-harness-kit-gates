@@ -6,10 +6,18 @@ Both stay in sync intentionally — the YAML pin catches drift in the workflow
 file, this pytest catches drift in the Python contract description.
 
 Phase 4 added review.yml / security.yml / maintenance.yml as workflow_call
-reusables (alongside the pre-existing resolve-paths.yml). All four share
-the same shared input contract; the per-gate tests pin each one
-individually so a regression that breaks one judge's shape pin is
-localized.
+reusables (alongside the pre-existing resolve-paths.yml). All three share
+the same generic provider mechanism: `provider` is an informational label
+with a built-in default base_url for a couple of well-known names
+(minimax, deepseek); `provider_base_url` is an explicit override that
+works for ANY Anthropic-Messages-API-compatible provider (OpenAI-compatible
+gateway, self-hosted proxy, a brand-new vendor) without needing a code
+change to the workflow; a single `provider_api_key` secret carries
+whichever key the consumer supplies for their chosen provider. This
+collapsed the original N-hardcoded-branches-per-provider design (which
+would have needed a new `if:` step for every new vendor) into 2 generic
+branches (proxied vs. native Anthropic) shared identically across all
+three judges.
 """
 from __future__ import annotations
 
@@ -26,10 +34,14 @@ REVIEW_FILE = WORKFLOWS_DIR / "review.yml"
 SECURITY_FILE = WORKFLOWS_DIR / "security.yml"
 MAINTENANCE_FILE = WORKFLOWS_DIR / "maintenance.yml"
 
-# Inputs every Phase-4 judge workflow MUST declare.
+# Inputs every Phase-4 judge workflow MUST declare. provider is optional
+# (has a sensible default and works with any unrecognized label as long as
+# provider_base_url is set) -- workflow_call has no enum/choice constraint,
+# so "supported providers" is documentation, not schema.
 SHARED_INPUTS = {
     "gates_json_b64":        {"type": "string", "required": True},
-    "provider":              {"type": "string", "required": True},
+    "provider":              {"type": "string", "required": False},
+    "provider_base_url":     {"type": "string", "required": False},
     "model":                 {"type": "string", "required": False},
     "plugin_repo":           {"type": "string", "required": False},
     "plugin_skill_path":     {"type": "string", "required": False},
@@ -44,6 +56,14 @@ SHARED_INPUTS = {
 }
 
 SHARED_OUTPUTS = ("verdict", "agent_ran", "verdict_source")
+
+# Every judge takes exactly these 2 secrets: a generic provider key the
+# consumer supplies themselves, and the plugin-clone token.
+SHARED_SECRETS = ("install_token", "provider_api_key")
+
+# Well-known provider labels with a built-in default provider_base_url,
+# documented in each workflow's `provider` input description.
+KNOWN_PROVIDER_LABELS = ("minimax", "deepseek")
 
 
 def _expected_inputs_for(wf_path: pathlib.Path) -> dict:
@@ -114,7 +134,7 @@ def test_judge_workflow_is_workflow_call(wf_path, default_skill):
     wf = _load_judge(wf_path)
     assert "inputs" in wf
     assert "outputs" in wf
-    assert "secrets" in wf, f"{wf_path.name}: must declare secrets.install_token"
+    assert "secrets" in wf, f"{wf_path.name}: must declare secrets"
 
 
 @pytest.mark.parametrize("wf_path,default_skill", [
@@ -163,11 +183,26 @@ def test_judge_workflow_plugin_skill_path_default(wf_path, default_skill):
 
 
 @pytest.mark.parametrize("wf_path", [REVIEW_FILE, SECURITY_FILE, MAINTENANCE_FILE])
-def test_judge_workflow_install_token_secret_declared(wf_path):
+def test_judge_workflow_secrets_declared(wf_path):
+    """Every judge must declare exactly the 2 shared secrets: install_token
+    (plugin clone) and provider_api_key (the consumer's own key, never a
+    dev-kit-provided default)."""
     secrets = _load_judge(wf_path)["secrets"]
-    assert "install_token" in secrets, (
-        f"{wf_path.name}: must declare secrets.install_token for the plugin clone"
-    )
+    for name in SHARED_SECRETS:
+        assert name in secrets, f"{wf_path.name}: must declare secrets.{name}"
+
+
+@pytest.mark.parametrize("wf_path", [REVIEW_FILE, SECURITY_FILE, MAINTENANCE_FILE])
+def test_judge_workflow_no_provider_specific_secret_names(wf_path):
+    """No judge may declare a per-provider secret name (MINIMAX_API_KEY,
+    ANTHROPIC_API_KEY, DEEPSEEK_API_KEY, etc.) -- the whole point of the
+    generic provider_base_url + provider_api_key design is that adding a
+    new provider requires zero code changes to this workflow, including
+    zero new secret declarations."""
+    secrets = _load_judge(wf_path)["secrets"]
+    forbidden = {"MINIMAX_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "OPENAI_API_KEY"}
+    leaked = forbidden & set(secrets.keys())
+    assert not leaked, f"{wf_path.name}: provider-specific secret names found: {leaked}"
 
 
 def test_maintenance_extra_inputs():
@@ -176,20 +211,52 @@ def test_maintenance_extra_inputs():
     inputs = _load_judge(MAINTENANCE_FILE)["inputs"]
     for name in ("bump_pr_skip_pattern", "docs_check_cmd", "format_audit_cmd", "pr_title"):
         assert name in inputs, f"maintenance.yml: missing extra input {name}"
-    # Provider values are documented in the description (workflow_call
-    # inputs don't support enum/choice constraints -- that's
-    # workflow_dispatch-only). Deepseek is a maintenance-only provider.
-    assert "deepseek" in inputs["provider"]["description"], (
-        "maintenance.yml: provider description must mention deepseek"
+
+
+@pytest.mark.parametrize("wf_path", [REVIEW_FILE, SECURITY_FILE, MAINTENANCE_FILE])
+def test_provider_description_documents_known_labels(wf_path):
+    """All 3 judges support the SAME generic provider mechanism -- every
+    known-label default (minimax, deepseek) must be documented identically
+    across all three, since none of them hardcode which labels are
+    'allowed' anymore."""
+    desc = _load_judge(wf_path)["inputs"]["provider"]["description"]
+    for label in KNOWN_PROVIDER_LABELS:
+        assert label in desc, f"{wf_path.name}: provider description must mention {label}"
+
+
+@pytest.mark.parametrize("wf_path", [REVIEW_FILE, SECURITY_FILE, MAINTENANCE_FILE])
+def test_provider_base_url_empty_default(wf_path):
+    """provider_base_url defaults to empty (native Anthropic unless a
+    known provider label or an explicit override resolves one)."""
+    inputs = _load_judge(wf_path)["inputs"]
+    assert inputs["provider_base_url"]["default"] == "", (
+        f"{wf_path.name}: provider_base_url must default to empty string"
     )
 
 
-def test_review_security_no_deepseek():
-    for wf_path in (REVIEW_FILE, SECURITY_FILE):
-        desc = _load_judge(wf_path)["inputs"]["provider"]["description"]
-        assert "deepseek" not in desc, (
-            f"{wf_path.name}: provider description must NOT mention deepseek (review/security don't have it)"
-        )
+@pytest.mark.parametrize("wf_path", [REVIEW_FILE, SECURITY_FILE, MAINTENANCE_FILE])
+def test_judge_step_names_are_provider_agnostic(wf_path):
+    """The 2 judge-invocation steps must be named generically ('proxied
+    provider' / 'native anthropic'), not after a specific vendor -- this
+    is the direct evidence that adding a new provider needs no new step."""
+    wf = yaml.safe_load(wf_path.read_text())
+    job_name = "maintenance_judge" if wf_path.name == "maintenance.yml" else wf_path.stem
+    steps = wf["jobs"][job_name]["steps"]
+    step_names = {s.get("name", "") for s in steps}
+    assert any("proxied provider" in n for n in step_names), (
+        f"{wf_path.name}: missing a generic 'proxied provider' step"
+    )
+    assert any("native anthropic" in n for n in step_names), (
+        f"{wf_path.name}: missing a generic 'native anthropic' step"
+    )
+    forbidden_vendor_names = {"minimax", "deepseek", "codex"}
+    for n in step_names:
+        lowered = n.lower()
+        for vendor in forbidden_vendor_names:
+            assert vendor not in lowered, (
+                f"{wf_path.name}: step {n!r} names a specific vendor -- "
+                "the generic design should have no per-vendor step names"
+            )
 
 
 def test_judge_workflow_no_pull_request_trigger():
@@ -202,6 +269,7 @@ def test_judge_workflow_no_pull_request_trigger():
         assert "pull_request" not in on, (
             f"{wf_path.name}: must NOT declare on: pull_request (it's a reusable)"
         )
+
 
 def test_severity_gate_enabled_default_true():
     """severity_gate_enabled defaults to 'true' on every judge workflow."""
@@ -219,18 +287,15 @@ def test_downstream_gate_job_respects_severity_gate_enabled():
     regardless -- this mirrors the dev-harness-kit source behavior where
     GATES_<NAME>_ENABLED=false only disables the CI hard-fail, not the
     AI review itself."""
-    import yaml as _yaml
-
     downstream_job_name = {
         REVIEW_FILE: "severity_gate",
         SECURITY_FILE: "severity_gate",
         MAINTENANCE_FILE: "gate",
     }
     for wf_path, job_name in downstream_job_name.items():
-        wf = _yaml.safe_load(wf_path.read_text())
+        wf = yaml.safe_load(wf_path.read_text())
         job = wf["jobs"][job_name]
         assert "if" in job, f"{wf_path.name}.jobs.{job_name}: missing if: condition"
         assert "severity_gate_enabled" in job["if"], (
             f"{wf_path.name}.jobs.{job_name}.if: must reference inputs.severity_gate_enabled"
         )
-
