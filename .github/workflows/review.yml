@@ -97,6 +97,12 @@ on:
       install_token:
         description: token used to clone plugin_repo when the plugin source is private
         required: false
+      MINIMAX_API_KEY:
+        description: MiniMax provider API key (required when inputs.provider == 'minimax')
+        required: false
+      ANTHROPIC_API_KEY:
+        description: Anthropic provider API key (required when inputs.provider == 'anthropic' or 'codex')
+        required: false
 
 jobs:
   review:
