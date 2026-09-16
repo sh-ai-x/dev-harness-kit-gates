@@ -56,6 +56,10 @@ inputs:
     description: 'Optional shell command to format the audit comment. Empty = inline echo fallback.'
     required: false
     default: ''
+  severity_gate_enabled:
+    description: 'When "false", each judge agent still runs but its downstream deterministic gate is skipped.'
+    required: false
+    default: 'true'
 
 outputs:
   review:
@@ -123,6 +127,7 @@ runs:
         pr_is_from_fork: ${{ inputs.pr_is_from_fork }}
         pr_updated_at: ${{ inputs.pr_updated_at }}
         run_id: ${{ inputs.run_id }}
+        severity_gate_enabled: ${{ inputs.severity_gate_enabled }}
       secrets:
         install_token: ${{ secrets.install_token }}
 
@@ -140,6 +145,7 @@ runs:
         pr_is_from_fork: ${{ inputs.pr_is_from_fork }}
         pr_updated_at: ${{ inputs.pr_updated_at }}
         run_id: ${{ inputs.run_id }}
+        severity_gate_enabled: ${{ inputs.severity_gate_enabled }}
       secrets:
         install_token: ${{ secrets.install_token }}
 
@@ -159,5 +165,6 @@ runs:
         pr_title: ${{ inputs.pr_title }}
         pr_is_from_fork: ${{ inputs.pr_is_from_fork }}
         run_id: ${{ inputs.run_id }}
+        severity_gate_enabled: ${{ inputs.severity_gate_enabled }}
       secrets:
         install_token: ${{ secrets.install_token }}

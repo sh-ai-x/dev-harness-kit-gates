@@ -40,6 +40,7 @@ SHARED_INPUTS = {
     "pr_is_from_fork":       {"type": "string", "required": False},
     "pr_updated_at":         {"type": "string", "required": False},
     "run_id":                {"type": "string", "required": False},
+    "severity_gate_enabled": {"type": "string", "required": False},
 }
 
 SHARED_OUTPUTS = ("verdict", "agent_ran", "verdict_source")
@@ -201,3 +202,35 @@ def test_judge_workflow_no_pull_request_trigger():
         assert "pull_request" not in on, (
             f"{wf_path.name}: must NOT declare on: pull_request (it's a reusable)"
         )
+
+def test_severity_gate_enabled_default_true():
+    """severity_gate_enabled defaults to 'true' on every judge workflow."""
+    for wf_path in (REVIEW_FILE, SECURITY_FILE, MAINTENANCE_FILE):
+        inputs = _load_judge(wf_path)["inputs"]
+        assert inputs["severity_gate_enabled"]["default"] == "true", (
+            f"{wf_path.name}: severity_gate_enabled must default to 'true'"
+        )
+
+
+def test_downstream_gate_job_respects_severity_gate_enabled():
+    """The downstream deterministic gate job (severity_gate / gate) must be
+    skippable via inputs.severity_gate_enabled, while the upstream judge
+    agent job (review / security / maintenance_judge) always runs
+    regardless -- this mirrors the dev-harness-kit source behavior where
+    GATES_<NAME>_ENABLED=false only disables the CI hard-fail, not the
+    AI review itself."""
+    import yaml as _yaml
+
+    downstream_job_name = {
+        REVIEW_FILE: "severity_gate",
+        SECURITY_FILE: "severity_gate",
+        MAINTENANCE_FILE: "gate",
+    }
+    for wf_path, job_name in downstream_job_name.items():
+        wf = _yaml.safe_load(wf_path.read_text())
+        job = wf["jobs"][job_name]
+        assert "if" in job, f"{wf_path.name}.jobs.{job_name}: missing if: condition"
+        assert "severity_gate_enabled" in job["if"], (
+            f"{wf_path.name}.jobs.{job_name}.if: must reference inputs.severity_gate_enabled"
+        )
+

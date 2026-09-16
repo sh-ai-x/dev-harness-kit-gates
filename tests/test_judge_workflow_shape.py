@@ -164,3 +164,16 @@ def test_post_audit_format_audit_cmd_default_empty():
     """Default format_audit_cmd is empty → inline echo fallback for non-dev-kit consumers."""
     inputs = _load_post_audit()["inputs"]
     assert inputs["format_audit_cmd"]["default"] == ""
+
+def test_action_threads_severity_gate_enabled_to_every_gate():
+    """action.yml must forward inputs.severity_gate_enabled to all 3 gate
+    invocations so a composite-action consumer can disable the
+    deterministic gate without disabling the AI judge."""
+    steps = _load_action()["runs"]["steps"]
+    by_name = {s["name"]: s for s in steps}
+    for name in ("Run review gate", "Run security gate", "Run maintenance gate"):
+        step = by_name[name]
+        assert "severity_gate_enabled" in step["with"], (
+            f"{name}: must forward inputs.severity_gate_enabled"
+        )
+
