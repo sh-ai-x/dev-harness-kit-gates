@@ -1,9 +1,84 @@
 # dev-harness-kit/gates
 
+> **⚠️ ARCHIVED — 2026-09-16**
+>
+> This repo is read-only. See [Archive notice](#archive-notice) below.
+
 GitHub Actions reusable workflows and a composite action for the
 [dev-harness-kit](https://github.com/sh-ai-x/dev-harness-kit) gate
 machinery: `review`, `security`, `maintenance`, and the per-path rule
 resolver. (`auto-fix-pr` is deferred to Phase 5 — see Roadmap.)
+
+## Archive notice
+
+**Status (2026-09-16):** Archived. Read-only. No further development
+planned. Unarchive via repo Settings if a future need emerges — the
+git history, issues, and PRs are fully preserved.
+
+**Original intent:** Distribute the dev-harness-kit gate workflows as a
+separate, independently-versioned GitHub Action so a judge security
+patch could release without waiting for a plugin release, and so other
+repos could `uses: sh-ai-x/dev-harness-kit-gates/...@v1` directly.
+
+**Why archived:** The trade-off didn't justify the cost at this point
+in time.
+
+### Problems identified before archive
+
+1. **No current pain point solved.** No judge security patch had ever
+   been blocked by the dev-harness-kit plugin release cycle, and no
+   security fix was imminent. The "decoupled versioning" benefit was
+   speculative, not realised.
+
+2. **No external consumer.** The only potential user was the parent
+   dev-harness-kit repo itself (via thin wrappers in
+   `templates/ci/.github/workflows/`). The wrapper-replacement PR
+   (#877) that would have closed this loop was merged into
+   dev-harness-kit as a draft and then closed.
+
+3. **Marketplace listing added zero value.** The action's audience
+   was locked to existing dev-harness-kit users — who would already
+   install via `/dev-kit:ci-setup`, not by searching
+   github.com/marketplace. Discovery outside the locked-in user base
+   was not a realistic outcome.
+
+4. **Cross-repo complexity exceeded the gains.** Two repos meant
+   pin sync (`@v0.3.1` → `@v1` bumps required human follow-up PRs),
+   two-repo drift risk (universal helpers were copied verbatim), and
+   ongoing cognitive overhead ("is this fix in gates or in parent?").
+   None of this paid off in the absence of a real consumer.
+
+5. **Cleanup value was separable.** The thin-wrapper cleanup in PR
+   #877 (~2,500 lines of duplicate judge code) was real hygiene, but
+   it required the gates repo to exist. Without a consumer, that
+   cleanup work was orphaned — not a justification for keeping the
+   repo alive.
+
+### What still lives in the parent repo
+
+All judge logic (`review.yml` / `security.yml` / `maintenance.yml`)
+remains inline in
+[`sh-ai-x/dev-harness-kit/templates/ci/.github/workflows/`](https://github.com/sh-ai-x/dev-harness-kit/tree/main/templates/ci/.github/workflows/).
+This is the same shape that existed before Phase 4 began; the
+plugin release train remains the single source of truth for gate
+workflows.
+
+### If you need this back
+
+1. Open repo Settings → General → **Unarchive this repository**.
+2. Reopen the issues tracking deferred work (#11 auto-fix-pr,
+   #13 marketplace publish, #16 v1.0.0 tag, #17 path-rules Phase 1,
+   #19 babysit PRs).
+3. The `feat/phase4-judge-migration` branch and all PRs (#20–#26)
+   are preserved in git history; the migration work is recoverable.
+
+### Related closed artefacts
+
+- [PR #877](https://github.com/sh-ai-x/dev-harness-kit/pull/877)
+  in the parent repo — closed alongside the archive.
+- [PR #27](https://github.com/sh-ai-x/dev-harness-kit-gates/pull/27)
+  in this repo — merged, but the marketplace publish it prepared was
+  never performed.
 
 ## Install via GitHub Marketplace
 
