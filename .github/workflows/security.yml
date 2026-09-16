@@ -5,7 +5,11 @@
 # through inputs.* (plugin_repo, plugin_skill_path, install_token_secret,
 # audit_marker). The verdict-extraction logic, bootstrap-PR fallback
 # detection, severity gate, and audit comment format are universal and
-# were kept verbatim.
+# were kept verbatim. inputs.severity_gate_enabled (added post-Phase-4)
+# lets a consumer disable the deterministic gate job while the judge
+# agent keeps running -- restoring the source workflow's
+# GATES_<NAME>_ENABLED semantics (agent always runs; only the CI
+# hard-fail is toggleable).
 name: security
 
 on:
@@ -45,6 +49,17 @@ on:
         type: string
         required: false
         default: "<!-- dev-kit-verdict-audit -->"
+      severity_gate_enabled:
+        description: >-
+          When "false", the judge agent job still runs and posts its
+          verdict comment, but the downstream deterministic severity_gate
+          job is skipped entirely -- the human review-decision gate
+          (REVIEW_REQUIRED / CHANGES_REQUESTED) is what blocks merge
+          instead. Mirrors the .dev-kit/gates.json per-gate on/off
+          switch from the dev-harness-kit consumer.
+        type: string
+        required: false
+        default: "true"
       pr_number:
         description: PR number the judge is reviewing
         type: string
@@ -323,6 +338,7 @@ jobs:
     name: severity gate (security)
     runs-on: ubuntu-latest
     needs: [security]
+    if: inputs.severity_gate_enabled != 'false'
     permissions:
       contents: read
       pull-requests: write

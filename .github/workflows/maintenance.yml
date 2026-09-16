@@ -6,6 +6,10 @@
 #   - docs-updated sub-gate via inputs.docs_check_cmd (empty = skip the sub-gate)
 #   - audit comment format via inputs.format_audit_cmd (empty = inline echo fallback)
 #   - bump-PR skip pattern via inputs.bump_pr_skip_pattern
+#   - inputs.severity_gate_enabled (added post-Phase-4): consumer can
+#     disable the deterministic `gate:` job while maintenance_judge
+#     keeps running, restoring the source's GATES_MAINTENANCE_ENABLED
+#     semantics (agent always runs; only the CI hard-fail toggles)
 # The judge steps (minimax / anthropic / deepseek providers), the TOCTOU
 # `pr_meta` head-SHA capture, the verdict extraction flow, and the
 # severity gate logic are universal and were kept verbatim.
@@ -48,6 +52,16 @@ on:
         type: string
         required: false
         default: "<!-- dev-kit-verdict-audit -->"
+      severity_gate_enabled:
+        description: >-
+          When "false", the judge agent job still runs and posts its
+          verdict comment, but the downstream deterministic gate job
+          is skipped entirely -- the human review-decision gate is
+          what blocks merge instead. Mirrors the .dev-kit/gates.json
+          per-gate on/off switch from the dev-harness-kit consumer.
+        type: string
+        required: false
+        default: "true"
       bump_pr_skip_pattern:
         description: PR title prefix to skip (e.g. release-bump PRs the judge should not run on)
         type: string
@@ -344,6 +358,7 @@ jobs:
     name: maintenance gate (verdict + docs-updated)
     runs-on: ubuntu-latest
     needs: [maintenance_judge]
+    if: inputs.severity_gate_enabled != 'false'
     permissions:
       contents: read
       pull-requests: read
