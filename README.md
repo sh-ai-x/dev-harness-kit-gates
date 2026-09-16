@@ -128,38 +128,66 @@ jobs:
       pr_is_from_fork: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
       pr_updated_at: ${{ github.event.pull_request.updated_at }}
       run_id: ${{ github.run_id }}
+      severity_gate_enabled: ${{ vars.GATES_REVIEW_ENABLED }}
     secrets:
       install_token: ${{ secrets.DEV_KIT_GITHUB_TOKEN }}
+      MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
 (security.yml + maintenance.yml follow the same shape; maintenance
 adds `bump_pr_skip_pattern`, `docs_check_cmd`, `format_audit_cmd`,
-`pr_title`.)
+`pr_title`, and also accepts `secrets.DEEPSEEK_API_KEY`.)
 
-### Composite action (one-shot invocation)
+**`severity_gate_enabled`** (all 3 judges, default `"true"`): when set to
+`"false"` (e.g. `${{ vars.GATES_REVIEW_ENABLED }}` resolving to the string
+`"false"`), the judge agent job still runs and posts its verdict comment —
+only the downstream deterministic gate job is skipped, so the human
+review-decision gate is what blocks merge instead of a CI hard-fail.
+
+### `dev-harness-kit-gates` composite action — resolve only
+
+**Important:** a composite action's `uses:` steps can only invoke other
+*actions*, never a reusable *workflow* file — so this action can only run
+the path-rule resolver, not the judges themselves. Wire the resolver's
+outputs into your own job-level `uses:` calls (matching the review.yml
+example above) to actually gate on them:
 
 ```yaml
 jobs:
   gates:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
-      id-token: write
+    outputs:
+      review: ${{ steps.gates.outputs.review }}
+      security: ${{ steps.gates.outputs.security }}
+      maintenance: ${{ steps.gates.outputs.maintenance }}
     steps:
       - uses: sh-ai-x/dev-harness-kit-gates@v1
         id: gates
         with:
           gates_json_b64: ${{ vars.GATES_PATH_RULES_B64 }}
-          provider: ${{ vars.CI_REVIEW_PROVIDER || 'minimax' }}
-          pr_number: ${{ github.event.pull_request.number }}
-          pr_head_sha: ${{ github.event.pull_request.head.sha }}
-          pr_is_from_fork: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
-          docs_check_cmd: "python3 -m lib.maintenance_gate"
-        env:
-          MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+  review:
+    needs: gates
+    if: needs.gates.outputs.review == 'true'
+    uses: sh-ai-x/dev-harness-kit-gates/.github/workflows/review.yml@v1
+    with:
+      gates_json_b64: ${{ vars.GATES_PATH_RULES_B64 }}
+      provider: ${{ vars.CI_REVIEW_PROVIDER || 'minimax' }}
+      pr_number: ${{ github.event.pull_request.number }}
+      pr_head_sha: ${{ github.event.pull_request.head.sha }}
+      pr_is_from_fork: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+    secrets:
+      install_token: ${{ secrets.DEV_KIT_GITHUB_TOKEN }}
+      MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+  # security / maintenance jobs follow the same needs: gates pattern
 ```
+
+Most consumers will find it simpler to call
+`sh-ai-x/dev-harness-kit-gates/.github/workflows/resolve-paths.yml@v1`
+directly at the job level instead of this composite action — same
+resolver, same outputs, one less indirection.
 
 ## Roadmap
 

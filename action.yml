@@ -1,170 +1,163 @@
 name: 'dev-harness-kit/gates'
-description: 'Composite action that resolves which dev-harness-kit gates run for a PR, then calls each judge. Phase 4 — adds conditional invocation of review.yml / security.yml / maintenance.yml when the resolver enables them.'
+description: 'Composite action that resolves which dev-harness-kit gates should run for a PR, based on .dev-kit/gates.json path_rules.'
 author: 'sh-ai-x <tkd1496@gmail.com>'
+
+# IMPORTANT — what this action can and cannot do:
+#
+# A composite action's `runs.steps[].uses:` can only reference another
+# ACTION (a repo/directory with its own action.yml, or a Docker/JS
+# action) -- it CANNOT reference a reusable WORKFLOW file
+# (.github/workflows/*.yml). GitHub Actions has no mechanism for a
+# composite action to invoke a reusable workflow; only a JOB
+# (`jobs.<id>.uses: owner/repo/.github/workflows/x.yml@ref`) can do
+# that. An earlier revision of this file attempted
+# `uses: ./.github/workflows/review.yml` etc. inside `runs.steps` --
+# that is invalid syntax and would fail at the action-resolution step
+# with "Unable to resolve action ... repository or version not found".
+#
+# This action therefore does ONLY the path-rule resolution (the same
+# logic as resolve-paths.yml, inlined here since that too cannot be
+# `uses:`-called from a composite step). To actually run the judges,
+# the consumer's OWN workflow file must call each reusable workflow
+# at the JOB level -- see README.md's "Consumer examples" section for
+# the working pattern:
+#
+#   jobs:
+#     gates:
+#       uses: sh-ai-x/dev-harness-kit-gates@v1   # this action: resolve only
+#       with: { gates_json_b64: ... }
+#     review:
+#       needs: gates
+#       if: needs.gates.outputs.review == 'true'
+#       uses: sh-ai-x/dev-harness-kit-gates/.github/workflows/review.yml@v1
+#       with: { ... }
+#       secrets: { ... }
+#
+# (A job cannot `uses:` a composite action directly either -- so in
+# practice most consumers will just call resolve-paths.yml at the job
+# level instead of this composite action. This action remains useful
+# only as a STEP inside an existing job that also does other work.)
 
 inputs:
   gates_json_b64:
     description: 'base64-encoded JSON of `.dev-kit/gates.json` minus secrets'
     required: true
   provider:
-    description: 'LLM provider name (minimax | claude | codex)'
-    required: true
+    description: 'LLM provider name (minimax | claude | codex); reserved for consumer-side use, not consumed by this action'
+    required: false
+    default: ''
   model:
-    description: 'Model override; consumer-controlled'
+    description: 'Model override; reserved for consumer-side use, not consumed by this action'
     required: false
     default: ''
   output_artifact:
-    description: 'Name of the artifact storing the verdict comment payload'
+    description: 'Reserved for consumer-side use, not consumed by this action'
     required: false
     default: 'gate-verdict'
-  # Phase 4 (additive): per-gate inputs forwarded to the judge
-  # workflows. Defaults target the dev-harness-kit consumer; override
-  # for non-dev-kit repos.
-  plugin_repo:
-    description: 'GitHub slug of the plugin source (default: dev-harness-kit)'
-    required: false
-    default: 'sh-ai-x/dev-harness-kit'
-  pr_number:
-    description: 'PR number the judges should review'
-    required: false
-    default: ''
-  pr_head_sha:
-    description: 'PR head commit SHA (closes the agent→checkout TOCTOU)'
-    required: false
-    default: ''
-  pr_title:
-    description: 'PR title (used for bump-PR skip in maintenance)'
-    required: false
-    default: ''
-  pr_is_from_fork:
-    description: 'true when the PR head repo differs from the upstream repo (skip the agent runs)'
-    required: false
-    default: 'false'
-  pr_updated_at:
-    description: 'PR updated_at ISO timestamp (used as fallback cutoff for the PR-comments retry loop)'
-    required: false
-    default: ''
-  run_id:
-    description: 'GitHub Actions run id (used for the audit comment)'
-    required: false
-    default: '0'
-  docs_check_cmd:
-    description: 'Shell command for the docs-updated sub-gate. Empty = skip the sub-gate.'
-    required: false
-    default: ''
-  format_audit_cmd:
-    description: 'Optional shell command to format the audit comment. Empty = inline echo fallback.'
-    required: false
-    default: ''
-  severity_gate_enabled:
-    description: 'When "false", each judge agent still runs but its downstream deterministic gate is skipped.'
-    required: false
-    default: 'true'
 
 outputs:
   review:
     description: 'true iff review gate should run for this PR'
-    value: ${{ steps.resolve.outputs.review }}
+    value: ${{ steps.compute.outputs.review }}
   security:
     description: 'true iff security gate should run for this PR'
-    value: ${{ steps.resolve.outputs.security }}
+    value: ${{ steps.compute.outputs.security }}
   maintenance:
     description: 'true iff maintenance gate should run for this PR'
-    value: ${{ steps.resolve.outputs.maintenance }}
+    value: ${{ steps.compute.outputs.maintenance }}
   rule_warnings:
     description: 'JSON-encoded list of RuleWarning objects from the resolver'
-    value: ${{ steps.resolve.outputs.rule_warnings }}
-  # Phase 4 (additive): per-gate verdict / agent_ran / verdict_source
-  # outputs from each judge workflow. Empty when the gate did not run.
-  review_verdict:
-    description: 'Review judge verdict (Approve | Changes Requested | Blocked | empty)'
-    value: ${{ steps.review.outputs.verdict }}
-  review_agent_ran:
-    description: 'Whether the review judge agent actually ran'
-    value: ${{ steps.review.outputs.agent_ran }}
-  review_verdict_source:
-    description: 'Review verdict classifier tag'
-    value: ${{ steps.review.outputs.verdict_source }}
-  security_verdict:
-    description: 'Security judge verdict (Approve | Changes Requested | Blocked | empty)'
-    value: ${{ steps.security.outputs.verdict }}
-  security_agent_ran:
-    description: 'Whether the security judge agent actually ran'
-    value: ${{ steps.security.outputs.agent_ran }}
-  security_verdict_source:
-    description: 'Security verdict classifier tag'
-    value: ${{ steps.security.outputs.verdict_source }}
-  maintenance_verdict:
-    description: 'Maintenance judge verdict (Approve | Changes Requested | Blocked | empty)'
-    value: ${{ steps.maintenance.outputs.verdict }}
-  maintenance_agent_ran:
-    description: 'Whether the maintenance judge agent actually ran'
-    value: ${{ steps.maintenance.outputs.agent_ran }}
-  maintenance_verdict_source:
-    description: 'Maintenance verdict classifier tag'
-    value: ${{ steps.maintenance.outputs.verdict_source }}
+    value: ${{ steps.compute.outputs.rule_warnings }}
 
 runs:
   using: 'composite'
   steps:
-    - name: Resolve gate set from path_rules
-      id: resolve
-      uses: ./.github/workflows/resolve-paths.yml
-      with:
-        gates_json_b64: ${{ inputs.gates_json_b64 }}
+    - name: Decode gates.json
+      id: decode
+      shell: bash
+      env:
+        B64: ${{ inputs.gates_json_b64 }}
+      run: |
+        set -euo pipefail
+        echo "$B64" | base64 -d > gates.json
+        echo "gates.json size: $(wc -c < gates.json) bytes"
 
-    - name: Run review gate
-      id: review
-      if: steps.resolve.outputs.review == 'true'
-      uses: ./.github/workflows/review.yml
-      with:
-        gates_json_b64: ${{ inputs.gates_json_b64 }}
-        provider: ${{ inputs.provider }}
-        model: ${{ inputs.model }}
-        plugin_repo: ${{ inputs.plugin_repo }}
-        pr_number: ${{ inputs.pr_number }}
-        pr_head_sha: ${{ inputs.pr_head_sha }}
-        pr_is_from_fork: ${{ inputs.pr_is_from_fork }}
-        pr_updated_at: ${{ inputs.pr_updated_at }}
-        run_id: ${{ inputs.run_id }}
-        severity_gate_enabled: ${{ inputs.severity_gate_enabled }}
-      secrets:
-        install_token: ${{ secrets.install_token }}
+    - name: List changed paths
+      id: changed
+      uses: tj-actions/changed-files@v47
 
-    - name: Run security gate
-      id: security
-      if: steps.resolve.outputs.security == 'true'
-      uses: ./.github/workflows/security.yml
+    - name: Compute per-gate booleans
+      id: compute
+      uses: actions/github-script@v9
       with:
-        gates_json_b64: ${{ inputs.gates_json_b64 }}
-        provider: ${{ inputs.provider }}
-        model: ${{ inputs.model }}
-        plugin_repo: ${{ inputs.plugin_repo }}
-        pr_number: ${{ inputs.pr_number }}
-        pr_head_sha: ${{ inputs.pr_head_sha }}
-        pr_is_from_fork: ${{ inputs.pr_is_from_fork }}
-        pr_updated_at: ${{ inputs.pr_updated_at }}
-        run_id: ${{ inputs.run_id }}
-        severity_gate_enabled: ${{ inputs.severity_gate_enabled }}
-      secrets:
-        install_token: ${{ secrets.install_token }}
+        script: |
+          const fs = require('fs');
+          const gates = JSON.parse(fs.readFileSync('gates.json', 'utf8'));
+          const pathRules = gates.path_rules || [];
 
-    - name: Run maintenance gate
-      id: maintenance
-      if: steps.resolve.outputs.maintenance == 'true'
-      uses: ./.github/workflows/maintenance.yml
-      with:
-        gates_json_b64: ${{ inputs.gates_json_b64 }}
-        provider: ${{ inputs.provider }}
-        model: ${{ inputs.model }}
-        plugin_repo: ${{ inputs.plugin_repo }}
-        docs_check_cmd: ${{ inputs.docs_check_cmd }}
-        format_audit_cmd: ${{ inputs.format_audit_cmd }}
-        pr_number: ${{ inputs.pr_number }}
-        pr_head_sha: ${{ inputs.pr_head_sha }}
-        pr_title: ${{ inputs.pr_title }}
-        pr_is_from_fork: ${{ inputs.pr_is_from_fork }}
-        run_id: ${{ inputs.run_id }}
-        severity_gate_enabled: ${{ inputs.severity_gate_enabled }}
-      secrets:
-        install_token: ${{ secrets.install_token }}
+          // fnmatch-style matcher; mirrors tests/test_resolve_paths_logic.py.
+          function matchGlob(path, pattern) {
+            const regex = pattern
+              .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+              .replace(/\\*\\*/g, '::DOUBLESTAR::')
+              .replace(/\\*/g, '[^/]*')
+              .replace(/::DOUBLESTAR::/g, '.*')
+              .replace(/\\?/g, '.');
+            return new RegExp('^' + regex + '$').test(path);
+          }
+          function ruleMatches(rule, paths) {
+            const matched = paths.filter(p =>
+              rule.when.some(g => matchGlob(p, g))
+            );
+            if (rule.mode === 'any') return matched.length > 0;
+            return matched.length === paths.length && paths.length > 0;
+          }
+
+          const defaults = Object.fromEntries(
+            Object.entries(gates.gates || {}).map(([k, v]) => [k, !!v.enabled])
+          );
+
+          const changedPaths = JSON.parse(process.env.CHANGED_PATHS_JSON || '[]');
+          const warnings = [];
+
+          // Union of matching rules' gates lists. If no rule matches,
+          // return defaults (fail-closed — never silently enable a gate).
+          let anyMatch = false;
+          const matchedGates = new Set();
+          for (const rule of pathRules) {
+            if (!ruleMatches(rule, changedPaths)) continue;
+            anyMatch = true;
+            for (const g of (rule.gates || [])) {
+              if (!(g in defaults)) {
+                warnings.push({rule: rule.name, gate: g, reason: 'unknown_gate_in_rule'});
+                continue;
+              }
+              matchedGates.add(g);
+            }
+          }
+          const out = anyMatch
+            ? Object.fromEntries(Object.keys(defaults).map(k => [k, matchedGates.has(k)]))
+            : defaults;
+
+          core.setOutput('review',      String(!!out.review));
+          core.setOutput('security',    String(!!out.security));
+          core.setOutput('maintenance', String(!!out.maintenance));
+          core.setOutput('rule_warnings', JSON.stringify(warnings));
+      env:
+        CHANGED_PATHS_JSON: ${{ steps.changed.outputs.paths }}
+
+    - name: Emit summary
+      if: always()
+      shell: bash
+      run: |
+        {
+          echo "### dev-harness-kit/gates — resolve"
+          echo
+          echo "| gate | run |"
+          echo "|---|---|"
+          echo "| review | ${{ steps.compute.outputs.review }} |"
+          echo "| security | ${{ steps.compute.outputs.security }} |"
+          echo "| maintenance | ${{ steps.compute.outputs.maintenance }} |"
+          echo
+          echo "warnings: \`${{ steps.compute.outputs.rule_warnings }}\`"
+        } >> "$GITHUB_STEP_SUMMARY"
