@@ -3,47 +3,6 @@
 All notable changes to `dev-harness-kit/gates` are documented here.
 This repo follows [semver](https://semver.org/) per `docs/release-process.md`.
 
-## [1.0.0] — Phase 5 — Marketplace publish (2026-09-16)
-
-First public major. The action is now usable as
-`sh-ai-x/dev-harness-kit-gates/.github/workflows/review.yml@v1` from any
-consumer repo. No input/output changes since 0.4.0 — the bump from
-`0.4.0` to `1.0.0` is the public-commitment gate per `docs/release-process.md`.
-
-**First consumer:** [sh-ai-x/dev-harness-kit#877](https://github.com/sh-ai-x/dev-harness-kit/pull/877)
-("feat(ci): replace review/security/maintenance templates with thin
-gates-repo wrappers", +341 / -2800, currently pinning `@v0.3.1`).
-Once #877 merges, the consumer-side follow-up bumps its pin to `@v1`.
-
-### Changed
-
-- `README.md` — added a top-level "Install via GitHub Marketplace" section
-  pointing at the `uses: sh-ai-x/dev-harness-kit-gates/.github/workflows/review.yml@v1`
-  pattern. The repo's existing detailed per-judge input contract and consumer
-  examples are unchanged.
-
-### Publishing steps (human action required)
-
-The GitHub Marketplace "Publish" button cannot be clicked from the CLI.
-Once this tag is pushed, the operator must:
-
-1. Open repo Settings → Code and automation → Actions → General →
-   Marketplace.
-2. Click **Publish this action to the GitHub Marketplace**.
-3. Accept the publisher agreement if prompted.
-4. Set the marketplace listing icon (Settings → About → Icon, ≥64×64 PNG/SVG)
-   and one-line description + topics.
-5. Paste the marketplace URL into the parent `dev-harness-kit` repo's README.
-
-### Deferred (not in 1.0.0)
-
-- `auto-fix-pr.yml` migration — SPECIFIC to dev-harness-kit; planned as a
-  follow-up minor that adds it as a 4th reusable workflow without changing
-  the input/output contract of the three already shipped.
-- Wrapper-budget test (issue #12, in the parent repo) — quality-of-life gate,
-  not a correctness gate. Tracked as a post-1.0.0 hardening item; it does
-  not affect the action's `uses:` interface.
-
 ## [0.4.0] — Phase 4 — Judge migration (2026-09-16)
 
 ### Added

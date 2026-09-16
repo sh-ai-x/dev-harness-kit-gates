@@ -5,31 +5,6 @@ GitHub Actions reusable workflows and a composite action for the
 machinery: `review`, `security`, `maintenance`, and the per-path rule
 resolver. (`auto-fix-pr` is deferred to Phase 5 — see Roadmap.)
 
-## Install via GitHub Marketplace
-
-Pin `@v1` for forward-compatible minor bumps. The first live consumer is
-[sh-ai-x/dev-harness-kit](https://github.com/sh-ai-x/dev-harness-kit),
-currently pinned at `@v0.3.1` via
-[PR #877](https://github.com/sh-ai-x/dev-harness-kit/pull/877) — the
-consumer-side follow-up bumps that pin to `@v1` once this tag ships.
-
-```yaml
-jobs:
-  review:
-    uses: sh-ai-x/dev-harness-kit-gates/.github/workflows/review.yml@v1
-    with:
-      gates_json_b64: ${{ vars.GATES_PATH_RULES_B64 }}
-      provider: minimax
-      pr_number: ${{ github.event.pull_request.number }}
-      pr_head_sha: ${{ github.event.pull_request.head.sha }}
-    secrets:
-      install_token: ${{ secrets.DEV_KIT_GITHUB_TOKEN }}
-      provider_api_key: ${{ secrets.MINIMAX_API_KEY }}
-```
-
-The same shape works for `security.yml` and `maintenance.yml`. See
-**Consumer examples** below for the full per-judge configuration.
-
 ## What this repo is
 
 The dev-harness-kit plugin owns the source-of-truth state files
