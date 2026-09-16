@@ -19,9 +19,15 @@ on:
   workflow_call:
     inputs:
       gates_json_b64:
-        description: base64-encoded JSON of `.dev-kit/gates.json` minus secrets
+        description: >-
+          base64-encoded JSON of `.dev-kit/gates.json` minus secrets.
+          Not consumed by this workflow directly (it is only meaningful
+          to the path-rule resolver, resolve-paths.yml, or action.yml) --
+          optional so a caller that does not use path-rule-based gate
+          selection isn't forced to fabricate a value.
         type: string
-        required: true
+        required: false
+        default: ""
       provider:
         description: >-
           Provider label (informational + used to pick a built-in default
