@@ -102,7 +102,7 @@ jobs:
       MINIMAX_BASE_URL: https://api.minimax.io/anthropic
       MINIMAX_DEFAULT_MODEL: 'MiniMax-M3[1m]'
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.pr_head_sha }}
           fetch-depth: 1
@@ -330,7 +330,7 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       PR_NUMBER: ${{ inputs.pr_number }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 1
 
