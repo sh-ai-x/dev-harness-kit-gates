@@ -13,7 +13,7 @@ jobs:
     name: pytest (resolver + workflow_call pin + wrapper budget + universal helpers + judge shape)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
@@ -30,7 +30,7 @@ jobs:
     name: workflow_call input shape (yaml pin)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Pin inputs declared by resolve-paths.yml
         run: |
           set -euo pipefail
@@ -51,7 +51,7 @@ jobs:
     name: action.yml shape (yaml pin)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Pin action.yml metadata
         run: |
           set -euo pipefail
@@ -72,7 +72,7 @@ jobs:
     name: workflow YAML files parse
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Parse every workflow as YAML
         run: |
           set -euo pipefail
@@ -93,7 +93,7 @@ jobs:
     name: judge workflow_call shape (Phase 4 pin)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Pin inputs/outputs/secrets on each Phase 4 judge workflow
         run: |
           set -euo pipefail
