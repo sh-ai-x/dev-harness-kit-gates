@@ -1,41 +1,76 @@
-"""Wrapper budget test for the consumer-side workflow files.
+"""Wrapper budget test for the gates repo.
 
-Phase 4 migrates `templates/ci/.github/workflows/{review,security,maintenance,auto-fix-pr}.yml`
-in dev-harness-kit to thin wrappers that pin `uses: dev-harness-kit/gates/.github/workflows/<gate>.yml@v1`.
-This test pins the **consumer-side** budget for those wrappers — the line cap
-the dev-harness-kit fixture consumer must respect so the marketplace contract
-stays honest.
+Phase 4 promoted this test from a stub to a real check. It now:
 
-The test is a no-op until the consumer wrappers land; until then it documents
-the contract that future wrappers must satisfy.
+  1. Allows the Phase 4 reusable workflows (review.yml / security.yml /
+     maintenance.yml) under .github/workflows/ alongside the Phase 3
+     pair (resolve-paths.yml / ci.yml).
+  2. Pins a per-workflow line cap so any future bloat trips CI.
+  3. Asserts action.yml references all expected reusable workflows.
 """
 from __future__ import annotations
 
 import pathlib
 
-
-CONSUMER_WRAPPER_BUDGET_LINES = 60
-
-
-def test_wrapper_budget_contract_documented():
-    """Pin the budget so any PR that bloats a wrapper past the cap fails."""
-    assert CONSUMER_WRAPPER_BUDGET_LINES == 60, "update this test if the cap moves"
+import yaml
 
 
-def test_no_consumer_wrappers_in_this_repo():
-    """The gates repo owns REUSABLE workflows, not consumer wrappers.
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+WF_DIR = REPO_ROOT / ".github/workflows"
+ACTION_FILE = REPO_ROOT / "action.yml"
 
-    Consumer wrappers live in dev-harness-kit's `templates/ci/.github/workflows/`
-    and pin back to this repo. This repo must not duplicate them — otherwise
-    the marketplace action and the consumer wrapper drift.
-    """
-    wf_dir = pathlib.Path(__file__).resolve().parent.parent / ".github/workflows"
-    # resolve-paths.yml + ci.yml are the only files allowed here today.
-    allowed = {"resolve-paths.yml", "ci.yml"}
-    present = {p.name for p in wf_dir.glob("*.yml")}
-    unexpected = present - allowed
+# Phase 3 + Phase 4 reusable workflows live in this repo. Consumer
+# wrappers belong in dev-harness-kit's `templates/ci/.github/workflows/`
+# and pin back to this repo via `uses: sh-ai-x/dev-harness-kit-gates/.github/workflows/<gate>.yml@v1`.
+ALLOWED_WORKFLOW_FILES = {
+    "resolve-paths.yml",
+    "ci.yml",
+    "review.yml",
+    "security.yml",
+    "maintenance.yml",
+}
+
+# Per-workflow line cap. Source review.yml in dev-harness-kit is 674
+# lines; the migrated version trims to under this cap.
+WORKFLOW_LINE_CAP = 800
+
+
+def test_only_allowed_workflow_files_in_this_repo():
+    """The gates repo owns reusable workflows, not consumer wrappers."""
+    present = {p.name for p in WF_DIR.glob("*.yml")}
+    unexpected = present - ALLOWED_WORKFLOW_FILES
     assert not unexpected, (
         f"unexpected workflow files in this repo: {unexpected}. "
         "Consumer wrappers belong in dev-harness-kit's templates/ci/, "
         "not here."
     )
+
+
+def test_workflow_line_cap():
+    """No reusable workflow exceeds the line cap (keeps the marketplace
+    contract honest — a bloated workflow is a code-smell signal)."""
+    offenders = []
+    for name in sorted(ALLOWED_WORKFLOW_FILES):
+        path = WF_DIR / name
+        if not path.exists():
+            continue
+        line_count = sum(1 for _ in path.read_text().splitlines())
+        if line_count > WORKFLOW_LINE_CAP:
+            offenders.append(f"{name}: {line_count} lines > cap {WORKFLOW_LINE_CAP}")
+    assert not offenders, "workflows over the line cap: " + "; ".join(offenders)
+
+
+def test_action_yml_references_every_judge_workflow():
+    """action.yml must `uses:` review.yml / security.yml / maintenance.yml
+    so the composite action actually invokes each gate."""
+    action = yaml.safe_load(ACTION_FILE.read_text())
+    uses_set = {step.get("uses") for step in action["runs"]["steps"]}
+    for required in (
+        "./.github/workflows/review.yml",
+        "./.github/workflows/security.yml",
+        "./.github/workflows/maintenance.yml",
+        "./.github/workflows/resolve-paths.yml",
+    ):
+        assert required in uses_set, (
+            f"action.yml: must `uses:` {required} as one of its composite steps"
+        )

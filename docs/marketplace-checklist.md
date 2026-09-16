@@ -11,7 +11,7 @@ Each row links the requirement to the file it lives in.
 | 4 | `README.md` has usage example, inputs/outputs table, license | maintainer | `README.md` | renders on listing |
 | 5 | Tag `v0` released | ops | Releases → `v0.0.1` | `gh release create v0.0.1` succeeds |
 | 6 | Workflow security baseline (`zizmor` clean, pinned actions, no `pull_request_target`) | maintainer | `.github/workflows/*.yml` | `zizmor .` returns 0 |
-| 7 | Wrapper budget test green on dev-harness-kit's own consumer fixture | both | (Phase 4 PR) | `tests/test_marketplace_wrapper_budget.py` passes |
+| 7 | Wrapper budget test green | maintainer | `tests/test_wrapper_budget.py` | `python3 -m pytest tests/test_wrapper_budget.py -v` returns 0 (now runnable: Phase 4 promoted the test from stub to a real cap check) |
 | 8 | Backward-compat contract published | maintainer | `docs/release-process.md` | one-page doc with input/output stability rules |
 | 9 | Promote `@v0` → `@v1` | both | Releases → `v1.0.0` | marketplace listing updated |
 | 10 | Public listing opened | ops | marketplace publisher flow | URL published in dev-harness-kit README |

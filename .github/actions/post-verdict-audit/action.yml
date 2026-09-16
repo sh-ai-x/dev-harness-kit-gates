@@ -1,0 +1,106 @@
+# Originally adapted from sh-ai-x/dev-harness-kit@<commit-sha>
+# Source path: .github/actions/post-verdict-audit/action.yml
+# Phase 4 — parameterized the audit marker (inputs.audit_marker) and
+# the audit formatter (inputs.format_audit_cmd). When format_audit_cmd
+# is empty, the action falls back to a generic inline echo so non-dev-kit
+# consumers don't need lib.maintenance_gate installed.
+name: "Post verdict audit comment"
+description: >-
+  Compose + post the canonical verdict audit comment emitted by the
+  review / security / maintenance judge jobs. Bound to the PR head SHA
+  captured by the caller at run-start (closes the agent→checkout
+  TOCTOU). When inputs.format_audit_cmd is non-empty, the action
+  shells out to it (so dev-harness-kit consumers can keep using
+  `python3 -m lib.maintenance_gate --format-audit`). When empty,
+  the action formats the audit comment inline with the inputs.audit_marker
+  shell — no plugin-specific dependencies required.
+
+  NOTE: composite actions do not expose `github.*` or `job.*` contexts,
+  so `run_id`, `job`, `status`, `pr_number`, and `head_sha` are all
+  passed as explicit inputs by the caller.
+
+inputs:
+  pr_number:
+    description: PR number to post the audit comment on
+    required: true
+  gh_token:
+    description: "GitHub token with `pull-requests: write` scope"
+    required: true
+  run_id:
+    description: GitHub Actions run id (caller passes the github.run_id context)
+    required: true
+  job:
+    description: Job name (review / security / maintenance)
+    required: true
+  status:
+    description: Job status (success / failure / etc.) — caller passes the job.status context
+    required: true
+  verdict:
+    description: >-
+      Resolved judge verdict word (Approve / Changes Requested /
+      Blocked / MISSING). Pre-extracted by the caller.
+    required: true
+  source:
+    description: Source tag (defaults to lib.maintenance_gate for backward compat)
+    required: false
+    default: "lib.maintenance_gate"
+  head_sha:
+    description: >-
+      PR headRefOid captured at RUN-START (NOT after the judge step).
+      Required so the audit binds to the head the judge actually
+      evaluated. Empty string is intentional — distinguishes a
+      capture failure from a legacy caller.
+    required: true
+  audit_marker:
+    description: HTML marker prefix used in the inline fallback audit comment
+    required: false
+    default: "<!-- dev-kit-verdict-audit -->"
+  format_audit_cmd:
+    description: >-
+      Optional shell command that produces the audit body on stdout.
+      Receives the inputs as `--key value` flags via the wrapper
+      script. Empty = use the inline fallback.
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Format + post verdict audit comment
+      env:
+        GH_TOKEN: ${{ inputs.gh_token }}
+        PR_NUMBER: ${{ inputs.pr_number }}
+        RUN_ID: ${{ inputs.run_id }}
+        JOB: ${{ inputs.job }}
+        STATUS: ${{ inputs.status }}
+        VERDICT: ${{ inputs.verdict }}
+        SOURCE: ${{ inputs.source }}
+        HEAD_SHA: ${{ inputs.head_sha }}
+        AUDIT_MARKER: ${{ inputs.audit_marker }}
+        FORMAT_AUDIT_CMD: ${{ inputs.format_audit_cmd }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Defensive guard: a missing GH_TOKEN would silently post
+        # an empty audit comment via `gh pr comment`. Fail loud.
+        [[ -n "$GH_TOKEN" ]] || { echo "::error::gh_token input is empty"; exit 1; }
+
+        if [ -n "$FORMAT_AUDIT_CMD" ]; then
+          # Consumer-supplied formatter path: dev-harness-kit uses
+          # `python3 -m lib.maintenance_gate --format-audit`. The
+          # action shells out and trusts the caller's stdout.
+          audit_body="$($FORMAT_AUDIT_CMD \
+            --run "$RUN_ID" \
+            --job "$JOB" \
+            --status "$STATUS" \
+            --verdict "${VERDICT:-MISSING}" \
+            --source "$SOURCE" \
+            --extra "head_sha=${HEAD_SHA}")"
+        else
+          # Generic inline fallback: produce a single-line audit
+          # comment starting with the configured marker. Non-dev-kit
+          # consumers land here by default.
+          audit_body="${AUDIT_MARKER} run=${RUN_ID} job=${JOB} status=${STATUS} verdict=${VERDICT:-MISSING} source=${SOURCE} head_sha=${HEAD_SHA}"
+        fi
+
+        gh pr comment "$PR_NUMBER" --body "$audit_body"
