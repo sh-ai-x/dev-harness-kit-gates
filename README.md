@@ -77,12 +77,14 @@ Every Phase 4 judge workflow (`review.yml` / `security.yml` /
 | Input | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `gates_json_b64` | string | yes | — | base64-encoded JSON of `.dev-kit/gates.json` minus secrets |
-| `provider` | choice | yes | `minimax` | one of `minimax`, `claude`, `codex` (and `deepseek` for maintenance) |
+| `provider` | string | no | `minimax` | provider label — see "Choosing a provider" below |
+| `provider_base_url` | string | no | `""` | explicit provider base URL override — see below |
 | `model` | string | no | `""` | provider model override; empty = provider default |
 | `plugin_repo` | string | no | `sh-ai-x/dev-harness-kit` | GitHub slug of the plugin source |
 | `plugin_skill_path` | string | no | `skills/<gate>/SKILL.md` | path to the skill file inside the plugin |
 | `install_token_secret` | string | no | `DEV_KIT_GITHUB_TOKEN` | name of the secret holding the install token (informational) |
 | `audit_marker` | string | no | `<!-- dev-kit-verdict-audit -->` | HTML marker used in audit comments |
+| `severity_gate_enabled` | string | no | `"true"` | `"false"` → the judge agent still runs, but the downstream deterministic gate is skipped |
 | `bump_pr_skip_pattern` | string | no (maintenance only) | `chore(release): bump dev-kit to v` | PR title prefix to skip |
 | `docs_check_cmd` | string | no (maintenance only) | `""` | shell command for the docs-updated sub-gate |
 | `format_audit_cmd` | string | no (maintenance only) | `""` | shell command for the audit body format |
@@ -94,6 +96,83 @@ Every Phase 4 judge workflow (`review.yml` / `security.yml` /
 | `run_id` | string | no | `0` | GitHub Actions run id (used for the audit comment) |
 
 The 3 shared outputs are `verdict`, `agent_ran`, and `verdict_source`.
+The 2 shared secrets are `install_token` (plugin clone) and
+`provider_api_key` (see below — **you always supply your own key**).
+
+## Choosing and configuring a provider
+
+**The API key is never provided by this repo — you supply your own,
+stored as a secret in YOUR repo, and pass it in when you call the
+workflow.** This applies whether you installed via a marketplace
+`uses:` reference or cloned the repo directly — there is no
+"install-time" configuration step; every setting is passed per-call
+through `with:` / `secrets:`.
+
+Two inputs control which provider runs, and they work together:
+
+- **`provider`** — a label. Two labels have a built-in default base
+  URL: `minimax` and `deepseek`. Any other label (`anthropic`,
+  `openai`, `custom`, or simply omitted) has no built-in default.
+- **`provider_base_url`** — an explicit Anthropic-Messages-API-
+  compatible base URL. **Always wins over `provider`'s built-in
+  default when set.** Leaving both `provider` unrecognized AND
+  `provider_base_url` empty means native Anthropic auth (via
+  `claude-code-action`'s own `anthropic_api_key` input, no proxy).
+
+This means adding support for a provider that isn't `minimax` or
+`deepseek` — including **OpenAI**, a self-hosted gateway, or any future
+vendor — requires **zero changes to this repo**: just point
+`provider_base_url` at that provider's Anthropic-Messages-API-compatible
+endpoint and pass its key as `provider_api_key`.
+
+| You want to use... | `provider` | `provider_base_url` | `provider_api_key` secret |
+|---|---|---|---|
+| MiniMax | `minimax` (or omit) | leave empty (built-in default) | your MiniMax key |
+| DeepSeek | `deepseek` | leave empty (built-in default) | your DeepSeek key |
+| Native Anthropic | `anthropic` (or omit) | leave empty | your Anthropic API key |
+| OpenAI (via an Anthropic-compatible gateway) | `openai` | your gateway's base URL | your OpenAI (or gateway) key |
+| Any other / self-hosted provider | any label you like | that provider's base URL | that provider's key |
+
+```yaml
+# Example: MiniMax (built-in default base URL)
+jobs:
+  review:
+    uses: sh-ai-x/dev-harness-kit-gates/.github/workflows/review.yml@v1
+    with:
+      gates_json_b64: ${{ vars.GATES_PATH_RULES_B64 }}
+      provider: minimax
+      pr_number: ${{ github.event.pull_request.number }}
+      pr_head_sha: ${{ github.event.pull_request.head.sha }}
+    secrets:
+      provider_api_key: ${{ secrets.MINIMAX_API_KEY }}   # <- a secret YOU create in YOUR repo
+```
+
+```yaml
+# Example: any OpenAI-compatible / custom gateway (no code change needed here)
+jobs:
+  review:
+    uses: sh-ai-x/dev-harness-kit-gates/.github/workflows/review.yml@v1
+    with:
+      gates_json_b64: ${{ vars.GATES_PATH_RULES_B64 }}
+      provider: openai
+      provider_base_url: https://your-gateway.example.com/anthropic
+      model: gpt-5.1-compatible-model-name
+      pr_number: ${{ github.event.pull_request.number }}
+      pr_head_sha: ${{ github.event.pull_request.head.sha }}
+    secrets:
+      provider_api_key: ${{ secrets.OPENAI_API_KEY }}   # <- a secret YOU create in YOUR repo
+```
+
+Setting up the secret in your own repo (one-time, per provider you use):
+
+```bash
+gh secret set MINIMAX_API_KEY --repo <you>/<your-repo>
+# or for any other provider:
+gh secret set OPENAI_API_KEY --repo <you>/<your-repo>
+```
+
+then reference whichever one you set as `secrets.provider_api_key` in
+your workflow's `with:`/`secrets:` block, as shown above.
 
 ## Consumer examples
 
@@ -128,38 +207,66 @@ jobs:
       pr_is_from_fork: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
       pr_updated_at: ${{ github.event.pull_request.updated_at }}
       run_id: ${{ github.run_id }}
+      severity_gate_enabled: ${{ vars.GATES_REVIEW_ENABLED }}
     secrets:
       install_token: ${{ secrets.DEV_KIT_GITHUB_TOKEN }}
+      provider_api_key: ${{ secrets.MINIMAX_API_KEY }}   # swap for whichever key matches your chosen provider
 ```
 
 (security.yml + maintenance.yml follow the same shape; maintenance
 adds `bump_pr_skip_pattern`, `docs_check_cmd`, `format_audit_cmd`,
-`pr_title`.)
+`pr_title`. See "Choosing and configuring a provider" above for how
+`provider` / `provider_base_url` / `provider_api_key` work together —
+including for providers this repo has never heard of, like OpenAI.)
 
-### Composite action (one-shot invocation)
+**`severity_gate_enabled`** (all 3 judges, default `"true"`): when set to
+`"false"` (e.g. `${{ vars.GATES_REVIEW_ENABLED }}` resolving to the string
+`"false"`), the judge agent job still runs and posts its verdict comment —
+only the downstream deterministic gate job is skipped, so the human
+review-decision gate is what blocks merge instead of a CI hard-fail.
+
+### `dev-harness-kit-gates` composite action — resolve only
+
+**Important:** a composite action's `uses:` steps can only invoke other
+*actions*, never a reusable *workflow* file — so this action can only run
+the path-rule resolver, not the judges themselves. Wire the resolver's
+outputs into your own job-level `uses:` calls (matching the review.yml
+example above) to actually gate on them:
 
 ```yaml
 jobs:
   gates:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
-      id-token: write
+    outputs:
+      review: ${{ steps.gates.outputs.review }}
+      security: ${{ steps.gates.outputs.security }}
+      maintenance: ${{ steps.gates.outputs.maintenance }}
     steps:
       - uses: sh-ai-x/dev-harness-kit-gates@v1
         id: gates
         with:
           gates_json_b64: ${{ vars.GATES_PATH_RULES_B64 }}
-          provider: ${{ vars.CI_REVIEW_PROVIDER || 'minimax' }}
-          pr_number: ${{ github.event.pull_request.number }}
-          pr_head_sha: ${{ github.event.pull_request.head.sha }}
-          pr_is_from_fork: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
-          docs_check_cmd: "python3 -m lib.maintenance_gate"
-        env:
-          MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+  review:
+    needs: gates
+    if: needs.gates.outputs.review == 'true'
+    uses: sh-ai-x/dev-harness-kit-gates/.github/workflows/review.yml@v1
+    with:
+      gates_json_b64: ${{ vars.GATES_PATH_RULES_B64 }}
+      provider: ${{ vars.CI_REVIEW_PROVIDER || 'minimax' }}
+      pr_number: ${{ github.event.pull_request.number }}
+      pr_head_sha: ${{ github.event.pull_request.head.sha }}
+      pr_is_from_fork: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+    secrets:
+      install_token: ${{ secrets.DEV_KIT_GITHUB_TOKEN }}
+      provider_api_key: ${{ secrets.MINIMAX_API_KEY }}   # swap for whichever key matches your chosen provider
+  # security / maintenance jobs follow the same needs: gates pattern
 ```
+
+Most consumers will find it simpler to call
+`sh-ai-x/dev-harness-kit-gates/.github/workflows/resolve-paths.yml@v1`
+directly at the job level instead of this composite action — same
+resolver, same outputs, one less indirection.
 
 ## Roadmap
 

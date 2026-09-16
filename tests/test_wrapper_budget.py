@@ -6,7 +6,10 @@ Phase 4 promoted this test from a stub to a real check. It now:
      maintenance.yml) under .github/workflows/ alongside the Phase 3
      pair (resolve-paths.yml / ci.yml).
   2. Pins a per-workflow line cap so any future bloat trips CI.
-  3. Asserts action.yml references all expected reusable workflows.
+  3. Asserts action.yml does NOT attempt to invoke a reusable workflow
+     from a composite step (invalid GH Actions syntax -- see
+     test_judge_workflow_shape.py's module docstring for the full
+     explanation of why action.yml cannot orchestrate the judges).
 """
 from __future__ import annotations
 
@@ -21,7 +24,8 @@ ACTION_FILE = REPO_ROOT / "action.yml"
 
 # Phase 3 + Phase 4 reusable workflows live in this repo. Consumer
 # wrappers belong in dev-harness-kit's `templates/ci/.github/workflows/`
-# and pin back to this repo via `uses: sh-ai-x/dev-harness-kit-gates/.github/workflows/<gate>.yml@v1`.
+# and pin back to this repo via job-level
+# `uses: sh-ai-x/dev-harness-kit-gates/.github/workflows/<gate>.yml@v1`.
 ALLOWED_WORKFLOW_FILES = {
     "resolve-paths.yml",
     "ci.yml",
@@ -60,17 +64,16 @@ def test_workflow_line_cap():
     assert not offenders, "workflows over the line cap: " + "; ".join(offenders)
 
 
-def test_action_yml_references_every_judge_workflow():
-    """action.yml must `uses:` review.yml / security.yml / maintenance.yml
-    so the composite action actually invokes each gate."""
+def test_action_yml_does_not_uses_reusable_workflows():
+    """action.yml (a composite action) must never `uses:` a
+    .github/workflows/*.yml path -- that syntax is invalid for composite
+    action steps (only job-level `uses:` can invoke a reusable workflow).
+    See test_judge_workflow_shape.py for the full design rationale.
+    """
     action = yaml.safe_load(ACTION_FILE.read_text())
-    uses_set = {step.get("uses") for step in action["runs"]["steps"]}
-    for required in (
-        "./.github/workflows/review.yml",
-        "./.github/workflows/security.yml",
-        "./.github/workflows/maintenance.yml",
-        "./.github/workflows/resolve-paths.yml",
-    ):
-        assert required in uses_set, (
-            f"action.yml: must `uses:` {required} as one of its composite steps"
+    for step in action["runs"]["steps"]:
+        uses = step.get("uses", "")
+        assert not uses.startswith("./.github/workflows/"), (
+            f"action.yml step {step.get('name')!r} uses={uses!r}: invalid — "
+            "composite steps cannot invoke reusable workflow files"
         )
