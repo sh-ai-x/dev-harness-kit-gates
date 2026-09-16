@@ -60,9 +60,15 @@ jobs:
           data = yaml.safe_load(pathlib.Path("action.yml").read_text())
           assert data["name"] == "dev-harness-kit/gates", data["name"]
           assert data["runs"]["using"] == "composite"
-          for inp in ("gates_json_b64", "provider"):
+          assert "gates_json_b64" in data["inputs"], "missing input: gates_json_b64"
+          assert data["inputs"]["gates_json_b64"]["required"] is True
+          # provider/model/output_artifact are reserved consumer-side inputs
+          # (this action only resolves path_rules; it never consumes
+          # provider/model itself) -- optional, not required. See
+          # action.yml's header comment for the full rationale.
+          for inp in ("provider", "model", "output_artifact"):
               assert inp in data["inputs"], f"missing input: {inp}"
-              assert data["inputs"][inp]["required"] is True, inp
+              assert data["inputs"][inp]["required"] is False, inp
           for out in ("review", "security", "maintenance", "rule_warnings"):
               assert out in data["outputs"], f"missing output: {out}"
           print("OK: action.yml shape pinned")
