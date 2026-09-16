@@ -39,7 +39,7 @@ MAINTENANCE_FILE = WORKFLOWS_DIR / "maintenance.yml"
 # provider_base_url is set) -- workflow_call has no enum/choice constraint,
 # so "supported providers" is documentation, not schema.
 SHARED_INPUTS = {
-    "gates_json_b64":        {"type": "string", "required": True},
+    "gates_json_b64":        {"type": "string", "required": False},
     "provider":              {"type": "string", "required": False},
     "provider_base_url":     {"type": "string", "required": False},
     "model":                 {"type": "string", "required": False},
